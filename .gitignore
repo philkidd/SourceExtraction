@@ -15,6 +15,9 @@ Old/
 Results/
 Small_Data/
 
+# python aux files
+*.pyc
+
 # Windows Installer files
 *.cab
 *.msi
