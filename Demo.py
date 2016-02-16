@@ -5,7 +5,7 @@ def GetDefaultParams():
     NumCent=0
     NonNegative = True
     data_name_set=['Hillman','HillmanSmall','Sophie2D','Sophie3D','SophieVoltage3D','Sara19DEC2015_w1t1']
-    data_name=data_name_set[4]
+    data_name=data_name_set[1]
     SuperVoxelize=False
     
     #default parameters

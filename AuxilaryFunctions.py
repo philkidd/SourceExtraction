@@ -125,7 +125,7 @@ def GetData(data_name):
     
     # Fetch experimental 3D data     
     if data_name=='HillmanSmall':
-        data=load(DataFolder + 'Hillman/data_small')
+        data=load('data_small')
     elif data_name=='Hillman':
         temp = h5py.File(DataFolder + 'Hillman/150724_mouseRH2d1_data_crop_zig_sm_ds.mat')
         data=temp["moviesub_sm"]
