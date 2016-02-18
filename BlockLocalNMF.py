@@ -560,7 +560,7 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
             S=LargestConnectedComponent(S,dims,adaptBias)
         if kk==iters-1:
             if FinalNonNegative==False:
-                NonNegative==False
+                NonNegative=False
         activity = HALS4activity(data, S, activity,NonNegative,inner_iterations)
 #       S=LargestConnectedComponent(S)   
         S, activity, mask,centers,boxes,ES,L=RenormalizeDeleteSort(S, activity, mask,centers,boxes,ES)
