@@ -55,9 +55,9 @@ def PruneComponents(shapes,activity,params,L):
         if cond1 or cond2:
             deleted_indices.append(ll) 
         
-    # If highly correlated with motion artifact
+    # If highly correlated with motion artifact?
     
-    # If shape overlaps with edge too much
+    # If shape overlaps with edge too much?
     
     # constraint on L2 of shape?
     

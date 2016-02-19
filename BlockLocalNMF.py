@@ -280,7 +280,7 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
 
         for _ in range(iters):
             for ll in range(L + adaptBias):
-                activity[ll] += nan_to_num((A[ll] - np.dot(B[ll].T, activity)-lam1_t-lam2_t*activity[ll]  ) / B[ll, ll])
+                activity[ll] += nan_to_num((A[ll] - np.dot(B[ll].T, activity)-lam1_t-lam2_t*activity[ll]  ) / B[ll, ll]) #maybe multiply lam1_t by np.sign[activity[ll]?
                 if NonNegative:
                     activity[ll][activity[ll] < 0] = 0
         return activity
@@ -323,9 +323,9 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
                 S[ll]=median_filter(S[ll],3)
             S_normalization=np.sum(S[ll])
             A_normalization=np.sum(activity[ll])
-            if A_normalization!=0:
+            if A_normalization>0:
                 activity[ll]=activity[ll]/A_normalization 
-            if ((A_normalization==0) and (S_normalization==0)):
+            if ((A_normalization<=0) and (S_normalization<=0)):
                 deleted_indices.append(ll)      
     
         #delete components with zero activity AND zero shape (these will never become non-zero again)

@@ -48,9 +48,13 @@ def PlotAll(SaveNames,params):
         try:
             results=load('NMF_Results/'+SaveNames[rep])
         except IOError:
-            break            
+            if rep==0:
+                print 'results file not found!!'              
+            else:
+                break            
         shapes=results['shapes']
         activity=results['activity']
+
         if rep>params.Background_num:
             adaptBias=False
         else:
@@ -64,13 +68,16 @@ def PlotAll(SaveNames,params):
             break
         
 #        shapes,activity,L=PruneComponents(shapes,activity,params,L)
+        
+        activity_NonNegative=np.copy(activity)
+        activity_NonNegative[activity_NonNegative<0]=0
         colors=GetRandColors(L)
         color_shapes=np.transpose(shapes[:L].reshape(L, -1,1)*colors,[1,0,2]) #weird transpose for tensor dot product next line
-        denoised_data = denoised_data + (activity[:L].T.dot(color_shapes)).reshape(tuple(dims)+(3,))        
-        residual = residual - activity.T.dot(shapes.reshape(L+adaptBias, -1)).reshape(dims)        
-        detrended_data= detrended_data - adaptBias*((activity[-1].reshape(-1, 1)).dot(shapes[-1].reshape(1, -1))).reshape(dims)
+        denoised_data = denoised_data + (activity_NonNegative[:L].T.dot(color_shapes)).reshape(tuple(dims)+(3,))        
+        residual = residual - activity_NonNegative.T.dot(shapes.reshape(L+adaptBias, -1)).reshape(dims)        
+        detrended_data= detrended_data - adaptBias*((activity_NonNegative[-1].reshape(-1, 1)).dot(shapes[-1].reshape(1, -1))).reshape(dims)
         
-        denoised_data =np.asarray(denoised_data ,dtype='float')
+#        denoised_data =np.asarray(denoised_data ,dtype='float')
     #    plt.close('all')
         
         #%% plotting params
@@ -295,8 +302,8 @@ def PlotAll(SaveNames,params):
             
             for cc in range(C):
                 ax2.append(plt.subplot(a,b,2+cc))
-                comp=shapes[components[cc]].max(0)*activity[components[cc],ii]
-                ma2=max(shapes[components[cc]].max(0))*max(activity[components[cc]])*scale
+                comp=shapes[components[cc]].max(0)*activity_NonNegative[components[cc],ii]
+                ma2=max(shapes[components[cc]].max(0))*max(activity_NonNegative[components[cc]])*scale
                 im2.append(ax2[cc].imshow(comp,vmin=0,vmax=ma2,cmap=cmap))
             #ax2[0].set_title('Shape')
             #    plt.colorbar(im2)
@@ -308,8 +315,8 @@ def PlotAll(SaveNames,params):
             
             for cc in range(C):
                 ax4.append(plt.subplot(a,b,2+b+cc))
-                comp=shapes[components[cc]].max(1)*activity[components[cc],ii]
-                ma2=max(shapes[components[cc]].max(1))*max(activity[components[cc]])*scale
+                comp=shapes[components[cc]].max(1)*activity_NonNegative[components[cc],ii]
+                ma2=max(shapes[components[cc]].max(1))*max(activity_NonNegative[components[cc]])*scale
                 im4.append(ax4[cc].imshow(comp,vmin=0,vmax=ma2,cmap=cmap))
             
             #plt.colorbar(im4)
@@ -320,8 +327,8 @@ def PlotAll(SaveNames,params):
             #plt.colorbar(im5)
             for cc in range(C):
                 ax6.append(plt.subplot(a,b,2+2*b+cc))
-                comp=np.transpose(shapes[components[cc]].max(2))*activity[components[cc],ii]
-                ma2=max(shapes[components[cc]].max(2))*max(activity[components[cc]])*scale
+                comp=np.transpose(shapes[components[cc]].max(2))*activity_NonNegative[components[cc],ii]
+                ma2=max(shapes[components[cc]].max(2))*max(activity_NonNegative[components[cc]])*scale
                 im6.append(ax6[cc].imshow(comp,vmin=0,vmax=ma2,cmap=cmap))
             
             #plt.colorbar(im6)
@@ -329,7 +336,7 @@ def PlotAll(SaveNames,params):
             fig.tight_layout()
             ComponentsActive=np.array([])
             for cc in range(C):
-                ComponentsActive=np.append(ComponentsActive,np.nonzero(activity[components[cc]]))
+                ComponentsActive=np.append(ComponentsActive,np.nonzero(activity_NonNegative[components[cc]]))
             ComponentsActive=np.unique(ComponentsActive)
             
             def update(tt):
@@ -339,9 +346,9 @@ def PlotAll(SaveNames,params):
                 im5.set_data(np.transpose(detrended_data[ii].max(2)))
             
                 for cc in range(C): 
-                    im2[cc].set_data(shapes[components[cc]].max(0)*activity[components[cc],ii])
-                    im4[cc].set_data(shapes[components[cc]].max(1)*activity[components[cc],ii])
-                    im6[cc].set_data(np.transpose(shapes[components[cc]].max(2))*activity[components[cc],ii])
+                    im2[cc].set_data(shapes[components[cc]].max(0)*activity_NonNegative[components[cc],ii])
+                    im4[cc].set_data(shapes[components[cc]].max(1)*activity_NonNegative[components[cc],ii])
+                    im6[cc].set_data(np.transpose(shapes[components[cc]].max(2))*activity_NonNegative[components[cc],ii])
                 title.set_text('Data, time = %.1f' % ii)
             
             if save_video==True:
@@ -711,9 +718,9 @@ if __name__ == "__main__":
     params,params_dict=GetDefaultParams()
     last_rep=params.repeats
     
-    saveName=[]
+    SaveNames=[]
     for rep in range(last_rep):
         name=GetFileName(params_dict,rep)
-        saveName.append(name)
+        SaveNames.append(name)
         
-    PlotAll(saveName,params)    
+    PlotAll(SaveNames,params)    
