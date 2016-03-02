@@ -249,7 +249,7 @@ def GetCenters(image):
         peaks[2] - magnitude ("height") of peak
     """
     from skimage.feature import peak_local_max
-    peaks = peak_local_max(image, min_distance=3, threshold_rel=.03, exclude_border=False).T
+    peaks = peak_local_max(image, min_distance=3, threshold_rel=0, exclude_border=False).T
     magnitude = image[list(peaks)]
     indices = argsort(magnitude)[::-1]
     peaks = list(peaks[:, indices]) + [magnitude[indices]]

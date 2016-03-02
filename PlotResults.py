@@ -6,23 +6,28 @@ def PlotAll(SaveNames,params):
     import matplotlib.animation as animation
     from matplotlib.backends.backend_pdf import PdfPages
     from scipy.ndimage.measurements import label    
-    from AuxilaryFunctions import GetRandColors, max_intensity,SuperVoxelize,GetData,PruneComponents
+    from AuxilaryFunctions import GetRandColors, max_intensity,SuperVoxelize,GetData,PruneComponents,SplitComponents,ThresholdShapes
 
     ## plotting params 
     # what to plot 
-    KeepCC=False #threshold shapes in the end and keep only connected components
     plot_activities=True
-    plot_shapes=True
+    plot_shapes_projections=False
+    plot_shapes_slices=True
     plot_activityCorrs=False
     plot_clustered_shape=False
-    plot_residual=False
-    make_video_shapes=False
-    make_video_residual=True
+    plot_residual_slices=True
+    plot_residual_projections=False
+    video_shapes=False
+    video_residual=True
+    video_slices=True
     # what to save
     save_video=True
     save_plot=True
-    close_figs=True#close all figs right after saving (to avoid memory overload)
-    
+    close_figs=False#close all figs right after saving (to avoid memory overload)
+    # PostProcessing   
+    Split=False   
+    Threshold=False #threshold shapes in the end and keep only connected components
+    Prune=False
     IncludeBackground=False #should we include the background as an extracted component?
     
     # how to plot
@@ -31,17 +36,18 @@ def PlotAll(SaveNames,params):
     restrict_support=True #in shape video, zero out data outside support of shapes
     C=4 #number of components to show in shape videos (if larger then number of shapes L, then we automatically set C=L)
     
+    
     # Fetch experimental 3D data 
     data=GetData(params.data_name)
     if params.SuperVoxelize==True:
-        data=SuperVoxelize(data)     
-    
-    
+        data=SuperVoxelize(data)
     dims=np.shape(data)
+    min_dim=np.argmin(dims[1:])
     denoised_data=0
     residual=data
     detrended_data=data
     
+    Results_folder='Results/'
     
     for rep in range(len(SaveNames)): 
         resultsName=SaveNames[rep]
@@ -55,26 +61,37 @@ def PlotAll(SaveNames,params):
         shapes=results['shapes']
         activity=results['activity']
 
-        if rep>params.Background_num:
+        if rep>=params.Background_num:
             adaptBias=False
         else:
             adaptBias=True
+            
         if IncludeBackground==True:
-            adaptBias=False                        
-        
-        L=len(activity)-adaptBias 
+            adaptBias=False        
 
+        L=len(activity)-adaptBias                 
+        
+        if Split==True:
+            shapes,activity,L,all_local_max=SplitComponents(shapes,activity,adaptBias)   
+        
+        if Prune==True:
+#            deleted_indices=[5,9,11,14,15,17,24]+range(25,36)
+            shapes,activity,L=PruneComponents(shapes,activity,params.TargetAreaRatio,L)
+        
+        orig_shapes=np.copy(shapes) #shapes before thresholding
+        if Threshold==True:            
+            shapes=ThresholdShapes(shapes,adaptBias,[],MaxRatio=0.3)
+        
         if L==0: #Stop if we encounter a file with zero components
             break
-        
-#        shapes,activity,L=PruneComponents(shapes,activity,params,L)
+                
         
         activity_NonNegative=np.copy(activity)
         activity_NonNegative[activity_NonNegative<0]=0
         colors=GetRandColors(L)
         color_shapes=np.transpose(shapes[:L].reshape(L, -1,1)*colors,[1,0,2]) #weird transpose for tensor dot product next line
         denoised_data = denoised_data + (activity_NonNegative[:L].T.dot(color_shapes)).reshape(tuple(dims)+(3,))        
-        residual = residual - activity_NonNegative.T.dot(shapes.reshape(L+adaptBias, -1)).reshape(dims)        
+        residual = residual - activity_NonNegative.T.dot(orig_shapes.reshape(L+adaptBias, -1)).reshape(dims)        
         detrended_data= detrended_data - adaptBias*((activity_NonNegative[-1].reshape(-1, 1)).dot(shapes[-1].reshape(1, -1))).reshape(dims)
         
 #        denoised_data =np.asarray(denoised_data ,dtype='float')
@@ -97,11 +114,11 @@ def PlotAll(SaveNames,params):
             for ii in range(L+adaptBias):
                 ax = plt.subplot(a,b,ii+1)
                 plt.plot(activity[ii])
-                plt.setp(ax,xticks=[],yticks=[])
+                plt.setp(ax,xticks=[],yticks=[0])
             plt.subplots_adjust(left, bottom, right, top, wspace, hspace)            
             
             if save_plot==True:
-                pp = PdfPages('Activities'+resultsName+'.pdf')
+                pp = PdfPages(Results_folder + 'Activities'+resultsName+'.pdf')
                 pp.savefig(fig0)
                 pp.close()
                 if close_figs:
@@ -110,7 +127,7 @@ def PlotAll(SaveNames,params):
         #%% ###### Plot Individual neurons' area which is correlated with their activities
         if plot_activityCorrs:
             if save_plot==True:
-                pp = PdfPages('CorrelationWithActivity'+resultsName+'.pdf')
+                pp = PdfPages(Results_folder + 'CorrelationWithActivity'+resultsName+'.pdf')
             for dd in range(len(shapes[0].shape)):
                 fig0=plt.figure(figsize=(11,18))
         
@@ -126,73 +143,11 @@ def PlotAll(SaveNames,params):
             pp.close()
             if close_figs:
                 plt.close('all')
-       
-        #%% Threshold shapes
-        TargetAreaRatio=[0.005,0.02]  #size of largest connected component
-        rho=2 #exponential search parameters
-        
-        if KeepCC==True:
-            for ll in range(L): 
-                threshold=0.1
-                threshold_high=-1
-                threshold_low=-1
-                while True:    
-                    temp=np.copy(shapes[ll])
-                    temp[temp<threshold]=0
-                    temp[temp>=threshold]=1
-                    # connected components target
-            #        CC,num_CC=label(temp)
-            #        sz=0
-            #        ind_best=0
-            #        for nn in range(num_CC):
-            #            current_sz=np.count_nonzero(CC[CC==nn])
-            #            if current_sz>sz:
-            #                ind_best=nn
-            #                sz=current_sz
-            #        print threshold,sz/sz_all
-            #        if ((sz/sz_all < TargetAreaRatio[0]) and (sz!=0)) or (np.sum(temp)==0):
-            #            threshold_high = threshold
-            #        elif (sz/sz_all > TargetAreaRatio[1]) or (sz==0):
-            #            threshold_low = threshold
-            #        else:
-            #            temp[CC!=ind_best]=0
-            #            shapes[ll]=np.copy(temp)
-            #            break
-                    # sparsity target
-                    if (mean(temp) < TargetAreaRatio[0]):
-                        threshold_high = threshold
-                    elif (mean(temp) > TargetAreaRatio[1]):
-                        threshold_low = threshold
-                    else:
-                        print mean(temp)
-                        temp=np.copy(shapes[ll])
-                        temp[temp<threshold]=0
-                        shapes[ll]=np.copy(temp)
-                        break
-            
-                    if threshold_high == -1:
-                        threshold = threshold * rho
-                    elif threshold_low == -1:
-                        threshold = threshold / rho
-                    else:
-                        threshold = (threshold_high + threshold_low) / 2
-            
-            for ll in range(L+adaptBias): 
-                temp=np.copy(shapes[ll])
-                CC,num_CC=label(temp)
-                sz=0
-                for nn in range(num_CC):
-                    current_sz=np.count_nonzero(CC[CC==nn])
-                    if current_sz>sz:
-                        ind_best=nn
-                        sz=current_sz
-                temp[CC!=ind_best]=0
-                shapes[ll]=np.copy(temp)
-        
+
         #%%  All Shapes projections
-        if plot_shapes:
+        if plot_shapes_projections:
             if save_plot==True:
-                pp = PdfPages('Shapes'+resultsName+'.pdf')
+                pp = PdfPages(Results_folder + 'Shapes_projections'+resultsName+'.pdf')
 
             for dd in range(len(shapes[0].shape)):
                 fig=plt.figure(figsize=(18 , 11))
@@ -228,10 +183,67 @@ def PlotAll(SaveNames,params):
         #for ll in range(L+adaptBias):
         #    print 'Sparsity=',np.mean(shapes[ll]>0)
                 
-        #%% ###### Plot Individual neurons' shape with clustering
+        #%%  All Shapes slices        
+        transpose_shape= True # should we transpose shape
+        ComponentsInFig=3 # number of components in Figure
+        index=0 #component display index
+#        z_slices=[0,1,2,3,4,5,6,7,8] #which z slices to look at slice plots/videos
+        z_slices=range(dims[min_dim+1]) #which z slices to look at slice plots/videos
+        
+        if plot_shapes_slices:            
+            if save_plot==True:
+                pp = PdfPages(Results_folder + 'Shapes_slices'+resultsName+'.pdf')
+            for ll in range(L+adaptBias):
+                if index==0:
+                    fig=plt.figure(figsize=(18, 11))
+                for dd in range(len(z_slices)):                
+                    ax = plt.subplot(ComponentsInFig,len(z_slices),index*len(z_slices)+dd+1) 
+                    temp=shapes[ll].take(dd,axis=min_dim)
+                    if transpose_shape:
+                        temp=np.transpose(temp)                                           
+                        
+                    mi=np.min(temp)
+                    ma=np.max(temp)
+                    plt.imshow(temp,vmin=mi,vmax=ma,cmap='gnuplot')
+                    plt.setp(ax,xticks=[],yticks=[])
+                    if dd==0:
+                        # component number
+                        ax.text(0.02, 0.8, str(ll),
+                        verticalalignment='bottom', horizontalalignment='left',
+                        transform=ax.transAxes,
+                        color='white',weight='bold', fontsize=13)
+                        #sparsity
+                        spar_str=str(np.round(np.mean(shapes[ll]>0)*100,2))+'%'
+                        ax.text(0.02, 0.02, spar_str,
+                        verticalalignment='bottom', horizontalalignment='left',
+                        transform=ax.transAxes,
+                        color='white',weight='bold', fontsize=13)
+                        #L^p
+                        for p in range(2,6,2):
+                            Lp=(np.sum(shapes[ll]**p))**(1/float(p))/np.sum(shapes[ll])
+                            Lp_str=str(np.round(Lp*100,2))+'%' #'L'+str(p)+'='+
+                            ax.text(0.02+p*0.15, 0.02, Lp_str,
+                            verticalalignment='bottom', horizontalalignment='left',
+                            transform=ax.transAxes,
+                            color='yellow',weight='bold', fontsize=13)
+                            
+                        
+                plt.subplots_adjust(left, bottom, right, top, wspace, hspace)
+                index+=1
+                if (ll%ComponentsInFig==(ComponentsInFig-1)) or ll==L+adaptBias-1:                    
+                    if save_plot==True:
+                        pp.savefig(fig)    
+                    index=0
+            pp.close()
+            if close_figs:
+                plt.close('all')
+        #for ll in range(L+adaptBias):
+        #    print 'Sparsity=',np.mean(shapes[ll]>0)
+                
+        #%% ###### Plot Individual neurons' shape projection with clustering
         if plot_clustered_shape:
             from sklearn.cluster import spectral_clustering
-            pp = PdfPages('ClusteredShapes'+resultsName+'.pdf')
+            pp = PdfPages(Results_folder + 'ClusteredShapes'+resultsName+'.pdf')
             figs=[]
             for dd in range(len(shapes[0].shape)):
                 figs.append(plt.figure(figsize=(18 , 11)))
@@ -265,9 +277,11 @@ def PlotAll(SaveNames,params):
             pp.close()
             if close_figs:
                 plt.close('all')
+                
+                
 
         #%% #####  Video Shapes
-        if make_video_shapes:
+        if video_shapes:
             components=range(min(asarray([C,L])))
             C=len(components)
             if restrict_support==True:
@@ -355,9 +369,9 @@ def PlotAll(SaveNames,params):
                 writer = animation.writers['ffmpeg'](fps=10)
                 ani = animation.FuncAnimation(fig, update, frames=len(ComponentsActive), blit=True, repeat=False)
                 if restrict_support==True:
-                    ani.save('Shapes_Restricted'+resultsName+'.mp4',dpi=dpi,writer=writer)
+                    ani.save(Results_folder + 'Shapes_Restricted'+resultsName+'.mp4',dpi=dpi,writer=writer)
                 else:                        
-                    ani.save('Shapes_'+resultsName+'.mp4',dpi=dpi,writer=writer)
+                    ani.save(Results_folder + 'Shapes_'+resultsName+'.mp4',dpi=dpi,writer=writer)
             else:
                 ani = animation.FuncAnimation(fig, update, frames=len(ComponentsActive), blit=True, repeat=False)
                 plt.show()
@@ -365,12 +379,12 @@ def PlotAll(SaveNames,params):
     
     #%% normalize denoised data range
 #    denoised_data=10*denoised_data/np.max(denoised_data)/scale
-    denoised_data=denoised_data/np.percentile(denoised_data,99)
+    denoised_data=denoised_data/np.percentile(denoised_data,99.5)
     denoised_data[denoised_data>1]=1
     
-    #%% ##### Plot denoised Results
+    #%% ##### Plot denoised projection - Results
 
-    if plot_residual==True:
+    if plot_residual_projections==True:
         
         dims=data.shape
         cmap='gnuplot'         
@@ -448,7 +462,7 @@ def PlotAll(SaveNames,params):
         plt.subplots_adjust(left, bottom, right, top, wspace, hspace)
     
         if save_plot==True:
-            pp = PdfPages('Data_Denoised_Residual_'+resultsName+'.pdf')
+            pp = PdfPages(Results_folder + 'Data_Denoised_Residual_Projections'+resultsName+'.pdf')
             pp.savefig(fig1)
             pp.savefig(fig2)
             pp.savefig(fig3)
@@ -461,8 +475,66 @@ def PlotAll(SaveNames,params):
     #plt.ylabel('MSE')
     #plt.show()
     
-    #%% #####  Video Residual    
-    if make_video_residual:
+     #%% ##### Plot denoised slices - Results
+    z_slices=[0,2,4,6,8] #which z slices to look at slice plots/videos
+#    z_slices=range(dims[min_dim+1]) #which z slices to look at slice plots/videos
+    D=len(z_slices)
+    if plot_residual_slices==True:
+        
+        dims=data.shape
+        cmap='gnuplot'         
+        
+        pic_residual=percentile(residual, 95, axis=0)
+        pic_denoised = max_intensity(denoised_data, axis=0)
+        pic_data=percentile(data, 95, axis=0)
+        
+        left  = 0.05 # the left side of the subplots of the figure
+        right = 0.95   # the right side of the subplots of the figure
+        bottom = 0.05   # the bottom of the subplots of the figure
+        top = 0.95      # the top of the subplots of the figure
+        wspace = 0.05   # the amount of width reserved for blank space between subplots
+        hspace = 0.05  # the amount of height reserved for white space between subplots
+        
+        a=3 #number of rows
+        fig1=plt.figure(figsize=(18,11))
+        mi=min(pic_data)
+        ma=max(pic_data)
+        for kk in range(D):        
+            ax2 = plt.subplot(a,D,kk+1)
+            temp=np.squeeze(np.take(pic_denoised,(z_slices[kk],),axis=min_dim))
+            im2=ax2.imshow(temp,interpolation='None')
+            ax2.set_title('Denoised')
+            plt.setp(ax2,xticks=[],yticks=[])
+            plt.colorbar(im2)
+            ax = plt.subplot(a,D,kk+D+1)
+            temp=np.squeeze(np.take(pic_data,(z_slices[kk],),axis=min_dim))
+            im=ax.imshow(temp,vmin=mi,vmax=ma,cmap=cmap)
+            ax.set_title('Data')
+            plt.colorbar(im)
+            plt.setp(ax,xticks=[],yticks=[])
+            ax3 = plt.subplot(a,D,kk+2*D+1)
+            temp=np.squeeze(np.take(pic_residual,(z_slices[kk],),axis=min_dim))
+            im3=ax3.imshow(temp,cmap=cmap)
+            ax3.set_title('Residual')
+            plt.setp(ax3,xticks=[],yticks=[])
+            plt.colorbar(im3)
+            plt.subplots_adjust(left, bottom, right, top, wspace, hspace)
+            
+        
+            if save_plot==True:
+                pp = PdfPages(Results_folder + 'Data_Denoised_Residual_Slice_'+resultsName+'.pdf')
+                pp.savefig(fig1)
+                pp.close()
+        
+        
+    #fig = plt.figure()
+    #plt.plot(MSE_array)
+    #plt.xlabel('Iteration')
+    #plt.ylabel('MSE')
+    #plt.show()
+    
+    #%% #####  Video Projections Residual    
+    if video_residual:
         fig = plt.figure(figsize=(16,7))
         mi = 0
         ma = max(detrended_data)*scale
@@ -487,32 +559,32 @@ def PlotAll(SaveNames,params):
                 transpose_flags[kk]=True    
                 
         for kk in range(D):
-            ax1 = plt.subplot(a,b,D*kk+1)
+            ax1 = plt.subplot(a,b,D*kk+1)            
+            if transpose_flags[kk]==False:
+                pic=max_intensity(denoised_data[ii],kk)
+            else:
+                pic=np.transpose(max_intensity(denoised_data[ii],kk),[1,0,2])  
+            im_array += [ax1.imshow(pic,interpolation='None')]
+            ax1.set_title('Denoised')
+            plt.colorbar(im_array[-1])
+            
+            ax2 = plt.subplot(a,b,D*kk+2)
             if transpose_flags[kk]==False:
                 pic=detrended_data[ii].max(kk)
             else:
                 pic=np.transpose(detrended_data[ii].max(kk))
                 
-            im_array += [ax1.imshow(pic, vmin=mi, vmax=ma,cmap=cmap)]
-            title=ax1.set_title('Data')
+            im_array += [ax2.imshow(pic, vmin=mi, vmax=ma,cmap=cmap)]
+            title=ax2.set_title('Data')            
             plt.colorbar(im_array[-1])
-            ax2 = plt.subplot(a,b,D*kk+2)
             
+            ax3 = plt.subplot(a,b,D*kk+3)            
             if transpose_flags[kk]==False:
                 pic=residual[ii].max(kk)
             else:
                 pic=np.transpose(residual[ii].max(kk))        
-            im_array += [ax2.imshow(pic, vmin=mi3, vmax=ma3,cmap=cmap)]
-            ax2.set_title('Residual')
-            plt.colorbar(im_array[-1])
-            ax3 = plt.subplot(a,b,D*kk+3)
-            
-            if transpose_flags[kk]==False:
-                pic=max_intensity(denoised_data[ii],kk)
-            else:
-                pic=np.transpose(max_intensity(denoised_data[ii],kk),[1,0,2])  
-            im_array += [ax3.imshow(pic,interpolation='None')]
-            ax3.set_title('Denoised')
+            im_array += [ax3.imshow(pic, vmin=mi3, vmax=ma3,cmap=cmap)]
+            ax3.set_title('Residual')
             plt.colorbar(im_array[-1])
 
         fig.tight_layout()
@@ -520,23 +592,104 @@ def PlotAll(SaveNames,params):
         def update(ii):
             for kk in range(D):
                 if transpose_flags[kk]==False:
-                    im_array[kk*D].set_data(detrended_data[ii].max(kk))        
-                    im_array[kk*D+1].set_data(residual[ii].max(kk)) 
-                    im_array[kk*D+2].set_data(max_intensity(denoised_data[ii],kk))
+                    im_array[kk*D].set_data(max_intensity(denoised_data[ii],kk))
+                    im_array[kk*D+1].set_data(detrended_data[ii].max(kk))        
+                    im_array[kk*D+2].set_data(residual[ii].max(kk))                     
                 else:
-                    im_array[kk*D].set_data(np.transpose(detrended_data[ii].max(kk)))        
-                    im_array[kk*D+1].set_data(np.transpose(residual[ii].max(kk))) 
-                    im_array[kk*D+2].set_data(np.transpose(max_intensity(denoised_data[ii],kk),[1,0,2]))
+                    im_array[kk*D].set_data(np.transpose(max_intensity(denoised_data[ii],kk),[1,0,2]))
+                    im_array[kk*D+1].set_data(np.transpose(detrended_data[ii].max(kk)))        
+                    im_array[kk*D+2].set_data(np.transpose(residual[ii].max(kk)))                     
             
             title.set_text('Data, time = %.1f' % ii)
         
         if save_video==True:
             writer = animation.writers['ffmpeg'](fps=10)
             ani = animation.FuncAnimation(fig, update, frames=len(data), blit=False, repeat=False)
-            ani.save('Data_Denoised_Residual'+resultsName+'.mp4',dpi=dpi,writer=writer)
+            ani.save(Results_folder + 'Data_Denoised_Residual_Projections'+resultsName+'.mp4',dpi=dpi,writer=writer)
         else:
             ani = animation.FuncAnimation(fig, update, frames=len(data), blit=False, repeat=False)
             plt.show()  
+            
+    #%% #####  Video Slices Residual    
+    z_slices=[0,2,4,6,8] #which z slices to look at slice plots/videos    
+#    z_slices=range(dims[min_dim+1]) #which z slices to look at slice plots/videos
+    
+    if video_slices:
+        fig = plt.figure(figsize=(16,7))
+        mi = 0
+        ma = max(detrended_data)*scale
+        mi3 = 0
+        ma3 = max(residual)*scale
+
+        ii=0
+        #import colormaps as cmaps
+        #cmap=cmaps.viridis
+        cmap='gnuplot'
+        a=3
+        b=3
+        
+        D=len(z_slices) #number of spatial dimensions
+        im_array=[]
+        transpose_flag= True
+                
+        for kk in range(D):
+            ax1 = plt.subplot(a,D,kk+1)            
+            temp=np.squeeze(np.take(denoised_data[ii],(z_slices[kk],),axis=min_dim))
+            if transpose_flag==False:
+                pic=temp
+            else:
+                pic=np.transpose(temp,[1,0,2])  
+            im_array += [ax1.imshow(pic,interpolation='None')]
+            ax1.set_title('Denoised, z='+ str(z_slices[kk]+1))
+            plt.colorbar(im_array[-1])
+            
+            ax2 = plt.subplot(a,D,kk+D+1)
+            temp=np.squeeze(np.take(detrended_data[ii],(z_slices[kk],),axis=min_dim))
+            if transpose_flag==False:
+                pic=temp
+            else:
+                pic=np.transpose(temp)
+                
+            im_array += [ax2.imshow(pic, vmin=mi, vmax=ma,cmap=cmap)]
+            title=ax2.set_title('Data')            
+            plt.colorbar(im_array[-1])
+            
+            ax3 = plt.subplot(a,D,kk+2*D+1) 
+            temp=np.squeeze(np.take(residual[ii],(z_slices[kk],),axis=min_dim))
+            if transpose_flag==False:
+                pic=temp
+            else:
+                pic=np.transpose(temp)       
+            im_array += [ax3.imshow(pic, vmin=mi3, vmax=ma3,cmap=cmap)]
+            ax3.set_title('Residual')
+            plt.colorbar(im_array[-1])
+
+        fig.tight_layout()
+            
+        def update(ii):
+            for kk in range(D):
+                temp1=np.squeeze(np.take(denoised_data[ii],(z_slices[kk],),axis=min_dim))
+                temp2=np.squeeze(np.take(detrended_data[ii],(z_slices[kk],),axis=min_dim))
+                temp3=np.squeeze(np.take(residual[ii],(z_slices[kk],),axis=min_dim))
+                if transpose_flag==False:                    
+                    im_array[a*kk].set_data(temp1)
+                    im_array[a*kk+1].set_data(temp2)        
+                    im_array[a*kk+2].set_data(temp3)                     
+                else:
+                    im_array[a*kk].set_data(np.transpose(temp1,[1,0,2]))
+                    im_array[a*kk+1].set_data(np.transpose(temp2))        
+                    im_array[a*kk+2].set_data(np.transpose(temp3))                     
+            
+            title.set_text('Data, time = %.1f' % ii)
+        
+        if save_video==True:
+            writer = animation.writers['ffmpeg'](fps=10)
+            ani = animation.FuncAnimation(fig, update, frames=len(data), blit=False, repeat=False)
+            ani.save(Results_folder + 'Data_Denoised_Residual_Slices'+resultsName+'.mp4',dpi=dpi,writer=writer)
+        else:
+            ani = animation.FuncAnimation(fig, update, frames=len(data), blit=False, repeat=False)
+            plt.show()              
+            
     #
     #fig = plt.figure(figsize=(dims[1] , dims[2]))
     #mi = min(data)

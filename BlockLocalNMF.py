@@ -1,8 +1,11 @@
-from numpy import min, max, asarray, percentile, zeros, ones, dot,reshape, r_, ix_, arange, exp, nan_to_num, prod, mean, sqrt, repeat
+from numpy import min, max, asarray, percentile, zeros, ones, reshape, r_, ix_, arange, exp, nan_to_num, prod, mean, sqrt, repeat
 from scipy.signal import welch
 from scipy.ndimage.filters import median_filter
 import numpy as np
 from scipy.ndimage.measurements import label
+from skimage.morphology import watershed
+from skimage.feature import peak_local_max
+from scipy.ndimage.filters import gaussian_filter
 
 def GetBox(centers, R, dims):
     D = len(R)
@@ -39,14 +42,15 @@ def DownScale(data,mb,ds):
         ----------
         data : array, shape (T, X, Y[, Z])
             block of the data
-        mbs : list
+        mbs : int
             minibatchsizes for temporal downsampling 
-        ds : int
-            factor for spatial downsampling - must divide X,Y and Z!        
+        ds : list/vector or int
+            factor for spatial downsampling - must divide X,Y and Z! 
+            if list/vector, length equal the number spatial dimensions in data
     
         Returns
         -------
-        data0 : array, shape (T/mb, (X/ds)*(Y/ds)[*(Z/ds)])
+        data0 : array, shape (T/mb, (X/ds[0])*(Y/ds[1])[*(Z/ds[2])])
             downscaled block of the data
         dims0 : array, vector
             original dimensions of the data0
@@ -54,13 +58,18 @@ def DownScale(data,mb,ds):
         """
     dims = data.shape
     D = len(dims)
+    if type(ds)==int:
+        ds=ds*np.ones(D-1)
+    elif (len(ds)!=D-1):
+        print "either type(ds)==int, or len(ds)== the number of spatial dimensions in data"
+        return
     data0 = data[:int(len(data) / mb) * mb].reshape((-1, mb) + data.shape[1:]).mean(1)
     if D == 4:
-        data0 = data0[:,:int(dims[1] /ds) *ds,:int(dims[2] /ds) *ds,:int(dims[3] /ds) *ds].reshape(
-            len(data0), dims[1] / ds, ds, dims[2] / ds, ds, dims[3] / ds, ds)\
+        data0 = data0[:,:int(dims[1] /ds[0]) *ds[0],:int(dims[2] /ds[1]) *ds[1],:int(dims[3] /ds[2]) *ds[2]].reshape(
+            len(data0), dims[1] / ds[0], ds[0], dims[2] / ds[1], ds[1], dims[3] / ds[2], ds[2])\
             .mean(2).mean(3).mean(4)
     else:
-        data0 = data0[:,:int(dims[1] /ds) *ds,:int(dims[2] /ds) *ds].reshape(len(data0), dims[1] / ds, ds, dims[2] / ds, ds).mean(2).mean(3)
+        data0 = data0[:,:int(dims[1] /ds[0]) *ds[0],:int(dims[2] /ds[1]) *ds[1]].reshape(len(data0), dims[1] / ds[0], ds[0], dims[2] / ds[1], ds[1]).mean(2).mean(3)
     # for i,d in enumerate(dims[1:]):
     #     data0 = data0.reshape(data0.shape[:1+i] + (d / ds, ds, -1)).mean(2+i)
     dims0 = data0.shape
@@ -85,9 +94,45 @@ def LargestConnectedComponent(shapes,dims,skipBias):
         shapes[ll]=np.copy(temp)
     shapes=shapes.reshape((len(shapes),-1))
     return shapes
+    
+def LargestWatershedRegion(shapes,dims,skipBias): 
+    L=len(shapes)-skipBias     
+    shapes=shapes.reshape((-1,) + dims[1:]) 
+    D=len(dims)
+    num_peaks=2
+#    structure=np.ones(tuple(3*np.ones((np.ndim(shapes)-1,1))))
+    for ll in range(L): 
+        temp=shapes[ll]
+        local_maxi = peak_local_max(gaussian_filter(temp,[1]*(D-1)), exclude_border=False, indices=False, num_peaks=num_peaks)
+        markers,junk = label(local_maxi)
+        nonzero_mask=temp>0
+        if np.sum(nonzero_mask)>(3**3)*num_peaks:
+            labels = watershed(-temp, markers, mask=nonzero_mask)        #watershed regions
+            temp[labels!=1]=0
+            shapes[ll]=temp
+    shapes=shapes.reshape((len(shapes),-1))
+    return shapes
+    
+def SmoothBackground(shapes,dims,adaptBias,sig_filt): 
+    num_peaks=2
+    thresh=0.6
+    if adaptBias==True:
+        temp=gaussian_filter(shapes[-1].reshape(dims[1:]),sig_filt)
+        local_maxi = peak_local_max(temp, exclude_border=False, indices=False, num_peaks=num_peaks)
+        markers,num_markers = label(local_maxi)
+        if num_markers>1:
+            foo=gaussian_filter(1.0*(markers==1),sig_filt)
+            nonzero_mask=(foo/np.max(foo))>thresh
+
+            temp2=shapes[-1].reshape(dims[1:])
+            temp2[nonzero_mask]=0
+#            labels = watershed(-temp, markers, mask=nonzero_mask)        #watershed regions
+#            temp2[labels==1]=0
+            shapes[-1]=np.ndarray.flatten(temp2)
+    return shapes
 
 class ExponentialSearch:
-    def __init__(self,lam,rho=2.0):
+    def __init__(self,lam,rho=2):
         # lam - an array of parameter values
         self.lam=lam
         self.lam_high=-np.ones_like(lam)
@@ -95,7 +140,7 @@ class ExponentialSearch:
         self.rho=rho #exponential search parameters
     
     def update(self,decrease,increase):
-        ''' decrease - an array the size of lambda
+        ''' decrease - an array the sFize of lambda
                 indicates which lam values should decrease
             increase - an array the size of lambda
                 indicates which lam values should increase
@@ -124,8 +169,8 @@ class ExponentialSearch:
         self.lam=self.lam[indices]
         
 def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=False,adaptBias=True,TargetAreaRatio=[],estimateNoise=False,
-             PositiveError=False,MedianFilt=False,Connected=False,FixSupport=False, 
-             updateLambdaIntervals=2,updateRhoIntervals=2,addComponentsIntervals=1,
+             PositiveError=False,MedianFilt=False,Connected=False,FixSupport=False, WaterShed=False,SmoothBkg=False,
+             updateLambdaIntervals=2,updateRhoIntervals=2,addComponentsIntervals=1,bkg_per=20,
              iters=10,iters0=[30], mbs=[1], ds=1,lam1_s=0,lam1_t=0,lam2_s=0,lam2_t=0):
     """
     Parameters
@@ -154,6 +199,10 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
         do median filter of spatial components 
     Connected: boolean
         impose connectedness of spatial component by keeping only the largest non-zero connected component in each iteration of HALS
+    WaterShed: boolean
+        impose that each spatial component has a single watershed region
+    SmoothBkg: boolean
+        Remove local peaks from background component
     FixSupport : boolean
         do not allow spatial components to be non-zero where sub-sampled spatial components are zero
     updateLambdaIntervals : int
@@ -162,14 +211,16 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
         decrease rho, update rate of lam1_s, every this number of updateLambdaIntervals HALS iterations (only active during main iterations)
     addComponentsIntervals : int
         add new component, if possible, every this number of updateLambdaIntervals HALS iterations (only active during sub-sampled iterations)
+    bkg_per : float
+        the background is intialized at this height (percentrilce image)
     iters : int
         number of final iterations on whole data
     iters0 : list
         numbers of initial iterations on subset
     mbs : list
         minibatchsizes for temporal downsampling 
-    ds : int
-        factor for spatial downsampling - must divide X,Y and Z!
+    ds : int or list
+        factor for spatial downsampling, can be an integer or a list of the size of spatial dimensions
     lam1_s : float
         L_1 regularization constant for sparsity of shapes
     lam2_s : float
@@ -325,8 +376,10 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
             A_normalization=np.sum(activity[ll])
             if A_normalization>0:
                 activity[ll]=activity[ll]/A_normalization 
-            if ((A_normalization<=0) and (S_normalization<=0)):
-                deleted_indices.append(ll)      
+                S[ll]=S[ll]*A_normalization 
+            if ll<L: # don't delete background component
+                if ((A_normalization<=0) and (S_normalization<=0)):
+                    deleted_indices.append(ll)      
     
         #delete components with zero activity AND zero shape (these will never become non-zero again)
         for ll in deleted_indices[::-1]:     
@@ -376,12 +429,14 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
         
     
     data0,dims0=DownScale(data,mb,ds)
+    if type(ds)==int:
+        ds=ds*np.ones(D-1)
 
     if D == 4:
-        activity = data0[:, map(int, centers[:, 0] / ds), map(int, centers[:, 1] / ds),
-                         map(int, centers[:, 2] / ds)].T
+        activity = data0[:, map(int, centers[:, 0] / ds[0]), map(int, centers[:, 1] / ds[1]),
+                         map(int, centers[:, 2] / ds[2])].T
     else:
-        activity = data0[:, map(int, centers[:, 0] / ds), map(int, centers[:, 1] / ds)].T
+        activity = data0[:, map(int, centers[:, 0] / ds[0]), map(int, centers[:, 1] / ds[1])].T
         
     data0 = data0.reshape(dims0[0], -1)
     Energy0=np.sum(data0**2,axis=0) #data energy per pixel
@@ -400,7 +455,7 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
         temp = zeros(dims0[1:])
         temp[map(lambda a: slice(*a), boxes[ll])]=1
         mask += np.where(temp.ravel())
-        temp = [(arange(dims[i + 1] / ds) - centers[ll][i] / ds) ** 2 / (2 * (sig[i] / ds) ** 2)
+        temp = [(arange(int(dims[i + 1] / ds[i])) -int( centers[ll][i] / ds[i])) ** 2 / (2 * (sig[i] / ds[i]) ** 2)
                 for i in range(D - 1)]
         temp = exp(-sum(ix_(*temp)))
         temp.shape = (1,) + dims0[1:]
@@ -411,8 +466,8 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
         S[ll] = RegionAdd(
             zeros((1,) + dims0[1:]), shapes[ll].reshape(1, -1), boxes[ll]).ravel()
     if adaptBias:
-        # Initialize background as 20% percentile
-        S[-1] = percentile(data0, 20, 0)
+        # Initialize background as bkg_per percentile
+        S[-1] = percentile(data0, bkg_per, 0)
         activity = np.r_[activity, ones((1, dims0[0]))]
     
     lam1_s=lam1_s0*np.ones_like(S)
@@ -464,6 +519,7 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
                         ES.update(cond_decrease,cond_increase)    
                         lam1_s=ES.lam
                     MSE = np.mean(sn**2)
+#                    MSE = np.mean((data0-np.dot(activity.T,S))**2)
                     if verbose and L>0:
                         
 #                        Norms=(np.sum(S*lam1_s)+lam1_t*np.sum(activity)+0.5*lam2_s*np.sum(S**2)+0.5*lam2_t*np.sum(activity**2))/ data.size
@@ -488,17 +544,25 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
                 S = HALS4shape(data0, S, activity,inner_iterations)
                 if Connected==True:
                     S=LargestConnectedComponent(S,dims0,adaptBias)
+                if WaterShed==True:
+                    S=LargestWatershedRegion(S,dims0,adaptBias)
                 activity = HALS4activity(data0, S, activity,NonNegative,inner_iterations)                
                 S, activity, mask,centers,boxes,ES,L=RenormalizeDeleteSort(S, activity, mask,centers,boxes,ES)
                 lam1_s=ES.lam
+                if SmoothBkg==True:
+                    S=SmoothBackground(S,dims0,adaptBias,tuple(np.array(sig)/np.array(ds)))
                 
                 print 'Subsampled iteration',kk,'it=',it,'L=',L
                 
             if it < len(iters0) - 1:
                 mb = mbs[it + 1]
                 data0 = data[:len(data) / mb * mb].reshape(-1, mb, prod(dims[1:])).mean(1)
-                data0 = data0.reshape(len(data0), dims[1] /
-                                      ds, ds, dims[2] / ds, ds).mean(-1).mean(-2)
+                if D==4:
+                    data0 = data0.reshape(len(data0), int(dims[1] / ds[0]), ds[0], int(dims[2] / ds[1]), ds[1],
+                                          int(dims[3] / ds[2]), ds[2]).mean(-1).mean(-2).mean(-3)                    
+                else:
+                    data0 = data0.reshape(len(data0), int(dims[1] / ds[0]), ds[0], int(dims[2] / ds[1]),
+                                          ds[1]).mean(-1).mean(-2)
                 data0.shape = (len(data0), -1)
                 
                 activity = ones((L + adaptBias, len(data0))) * activity.mean(1).reshape(-1, 1)
@@ -513,11 +577,11 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
             
         activity = ones((L + adaptBias, dims[0])) * activity.mean(1).reshape(-1, 1)
         if D==4:
-            S = repeat(repeat(repeat(S.reshape((-1,) + dims0[1:]), ds, 1), ds, 2), ds, 3)
-            lam1_s= repeat(repeat(repeat(lam1_s.reshape((-1,) + dims0[1:]), ds, 1), ds, 2), ds, 3)
+            S = repeat(repeat(repeat(S.reshape((-1,) + dims0[1:]), ds[0], 1), ds[1], 2), ds[2], 3)
+            lam1_s= repeat(repeat(repeat(lam1_s.reshape((-1,) + dims0[1:]), ds[0], 1), ds[1], 2), ds[2], 3)
         else:
-            S = repeat(repeat(S.reshape((-1,) + dims0[1:]), ds, 1), ds, 2)
-            lam1_s= repeat(repeat(lam1_s.reshape((-1,) + dims0[1:]), ds, 1), ds, 2)
+            S = repeat(repeat(S.reshape((-1,) + dims0[1:]), ds[0], 1), ds[1], 2)
+            lam1_s= repeat(repeat(lam1_s.reshape((-1,) + dims0[1:]), ds[0], 1), ds[1], 2)
         for dd in range(1,D):
             while S.shape[dd]<dims[dd]:
                 shape_append=np.array(S.shape)
@@ -550,6 +614,7 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
             sn_std=sn_target
         MSE_target = np.mean(sn_target**2)
         MSE_std=np.mean(sn_std**2)
+#        MSE = np.mean((data0-np.dot(activity.T,S))**2)
         
 #### Main Loop ####
   
@@ -558,6 +623,8 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
         S = HALS4shape(data, S, activity,inner_iterations)
         if Connected==True:            
             S=LargestConnectedComponent(S,dims,adaptBias)
+        if WaterShed==True:
+            S=LargestWatershedRegion(S,dims,adaptBias)
         if kk==iters-1:
             if FinalNonNegative==False:
                 NonNegative=False
