@@ -7,6 +7,7 @@ def PlotAll(SaveNames,params):
     from matplotlib.backends.backend_pdf import PdfPages
     from scipy.ndimage.measurements import label    
     from AuxilaryFunctions import GetRandColors, max_intensity,SuperVoxelize,GetData,PruneComponents,SplitComponents,ThresholdShapes
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
 
     ## plotting params 
     # what to plot 
@@ -15,11 +16,12 @@ def PlotAll(SaveNames,params):
     plot_shapes_slices=True
     plot_activityCorrs=False
     plot_clustered_shape=False
-    plot_residual_slices=True
+    plot_residual_slices=False
     plot_residual_projections=False
+    # videos to generate
     video_shapes=False
-    video_residual=True
-    video_slices=True
+    video_residual=False
+    video_slices=False
     # what to save
     save_video=True
     save_plot=True
@@ -35,7 +37,7 @@ def PlotAll(SaveNames,params):
     dpi=500 #for videos
     restrict_support=True #in shape video, zero out data outside support of shapes
     C=4 #number of components to show in shape videos (if larger then number of shapes L, then we automatically set C=L)
-    
+    color_map='gnuplot'
     
     # Fetch experimental 3D data 
     data=GetData(params.data_name)
@@ -104,8 +106,8 @@ def PlotAll(SaveNames,params):
         right = 0.95   # the right side of the subplots of the figure
         bottom = 0.05   # the bottom of the subplots of the figure
         top = 0.95      # the top of the subplots of the figure
-        wspace = 0.05   # the amount of width reserved for blank space between subplots
-        hspace = 0.05  # the amount of height reserved for white space between subplots        
+        wspace = 0.1   # the amount of width reserved for blank space between subplots
+        hspace = 0.12  # the amount of height reserved for white space between subplots        
               
         #%% ###### Plot Individual neurons' activities
         if plot_activities:
@@ -115,6 +117,11 @@ def PlotAll(SaveNames,params):
                 ax = plt.subplot(a,b,ii+1)
                 plt.plot(activity[ii])
                 plt.setp(ax,xticks=[],yticks=[0])
+                # component number
+                ax.text(0.02, 0.8, str(ii),
+                    verticalalignment='bottom', horizontalalignment='left',
+                    transform=ax.transAxes,
+                    color='black',weight='bold', fontsize=13)
             plt.subplots_adjust(left, bottom, right, top, wspace, hspace)            
             
             if save_plot==True:
@@ -134,7 +141,7 @@ def PlotAll(SaveNames,params):
                 for ii in range(L+adaptBias):
                     ax = plt.subplot(a,b,ii+1)
                     corr_imag=np.dot(activity[ii],np.transpose(data,[1,2,0,3]))/np.sqrt(np.sum(data**2,axis=0)*np.sum(activity[ii]**2))
-                    plt.imshow(np.abs(corr_imag).max(dd),cmap='gnuplot')
+                    plt.imshow(np.abs(corr_imag).max(dd),cmap=color_map)
                     plt.setp(ax,xticks=[],yticks=[])
                 plt.subplots_adjust(left, bottom, right, top, wspace, hspace)
             
@@ -156,24 +163,38 @@ def PlotAll(SaveNames,params):
                     temp=shapes[ll].max(dd)
                     if dd==2:
                         temp=temp.T
-                    mi=np.min(temp)
-                    ma=np.max(temp)
-                    plt.imshow(temp,vmin=mi,vmax=ma,cmap='gnuplot')
+                    mi=np.min(shapes[ll])
+                    ma=np.max(shapes[ll])
+                    im=plt.imshow(temp,vmin=mi,vmax=ma,cmap=color_map)
                     plt.setp(ax,xticks=[],yticks=[])
-                    #sparsity
-                    spar_str=str(np.round(np.mean(shapes[ll]>0)*100,2))+'%'
-                    ax.text(0.02, 0.02, spar_str,
+                    mn=int(np.floor(mi))        # colorbar min value
+                    mx=int(np.ceil(ma))         # colorbar max value
+                    md=(mx-mn)/2
+                    divider = make_axes_locatable(ax)
+                    cax = divider.append_axes("right", size="5%", pad=0.05)
+                    cb=plt.colorbar(im,cax=cax)
+                    cb.set_ticks([mn,md,mx])
+                    cb.set_ticklabels([mn,md,mx])
+                    
+                    # component number
+                    ax.text(0.02, 0.8, str(ll),
                     verticalalignment='bottom', horizontalalignment='left',
                     transform=ax.transAxes,
                     color='white',weight='bold', fontsize=13)
-                    #L^p
-                    for p in range(2,6,2):
-                        Lp=(np.sum(shapes[ll]**p))**(1/float(p))/np.sum(shapes[ll])
-                        Lp_str=str(np.round(Lp*100,2))+'%' #'L'+str(p)+'='+
-                        ax.text(0.02+p*0.2, 0.02, Lp_str,
-                        verticalalignment='bottom', horizontalalignment='left',
-                        transform=ax.transAxes,
-                        color='yellow',weight='bold', fontsize=13)
+#                    #sparsity
+#                    spar_str=str(np.round(np.mean(shapes[ll]>0)*100,2))+'%'
+#                    ax.text(0.02, 0.02, spar_str,
+#                    verticalalignment='bottom', horizontalalignment='left',
+#                    transform=ax.transAxes,
+#                    color='white',weight='bold', fontsize=13)
+#                    #L^p
+#                    for p in range(2,2,2):
+#                        Lp=(np.sum(shapes[ll]**p))**(1/float(p))/np.sum(shapes[ll])
+#                        Lp_str=str(np.round(Lp*100,2))+'%' #'L'+str(p)+'='+
+#                        ax.text(0.02+p*0.2, 0.02, Lp_str,
+#                        verticalalignment='bottom', horizontalalignment='left',
+#                        transform=ax.transAxes,
+#                        color='yellow',weight='bold', fontsize=13)
                 plt.subplots_adjust(left, bottom, right, top, wspace, hspace)
                 if save_plot==True:
                     pp.savefig(fig)            
@@ -202,10 +223,11 @@ def PlotAll(SaveNames,params):
                     if transpose_shape:
                         temp=np.transpose(temp)                                           
                         
-                    mi=np.min(temp)
-                    ma=np.max(temp)
-                    plt.imshow(temp,vmin=mi,vmax=ma,cmap='gnuplot')
+                    mi=np.min(shapes[ll])
+                    ma=np.max(shapes[ll])
+                    im=plt.imshow(temp,vmin=mi,vmax=ma,cmap=color_map)
                     plt.setp(ax,xticks=[],yticks=[])
+                    
                     if dd==0:
                         # component number
                         ax.text(0.02, 0.8, str(ll),
@@ -218,8 +240,16 @@ def PlotAll(SaveNames,params):
                         verticalalignment='bottom', horizontalalignment='left',
                         transform=ax.transAxes,
                         color='white',weight='bold', fontsize=13)
+                        mn=int(np.floor(mi))        # colorbar min value
+                        mx=int(np.ceil(ma))         # colorbar max value
+                        md=(mx-mn)/2
+                        divider = make_axes_locatable(ax)
+                        cax = divider.append_axes("bottom", size="5%", pad=0.05)
+                        cb=plt.colorbar(im,cax=cax,orientation="horizontal")
+                        cb.set_ticks([mn,md,mx])
+                        cb.set_ticklabels([mn,md,mx])
                         #L^p
-                        for p in range(2,6,2):
+                        for p in range(2,2,2):
                             Lp=(np.sum(shapes[ll]**p))**(1/float(p))/np.sum(shapes[ll])
                             Lp_str=str(np.round(Lp*100,2))+'%' #'L'+str(p)+'='+
                             ax.text(0.02+p*0.15, 0.02, Lp_str,
@@ -292,19 +322,19 @@ def PlotAll(SaveNames,params):
             
             fig = plt.figure(figsize=(16,7))
             mi = 0
-            ma = max(detrended_data)*scale
+            ma = max(data)*scale
             #mi2 = 0
             #ma2 = max(shapes[ll])*max(activity[ll])
             
             ii=0
             #import colormaps as cmaps
             #cmap=cmaps.viridis
-            cmap='gnuplot'
+            cmap=color_map
             a=3
             b=1+C
             
             ax1 = plt.subplot(a,b,1)
-            im1 = ax1.imshow(detrended_data[ii].max(0), vmin=mi, vmax=ma,cmap=cmap)
+            im1 = ax1.imshow(data[ii].max(0), vmin=mi, vmax=ma,cmap=cmap)
             title=ax1.set_title('Data')
             #plt.colorbar(im1)
             ax2=[] 
@@ -323,7 +353,7 @@ def PlotAll(SaveNames,params):
             #    plt.colorbar(im2)
             
             ax3 = plt.subplot(a,b,1+b)
-            im3 = ax3.imshow(detrended_data[ii].max(1), vmin=mi, vmax=ma,cmap=cmap)
+            im3 = ax3.imshow(data[ii].max(1), vmin=mi, vmax=ma,cmap=cmap)
             
             #plt.colorbar(im3)
             
@@ -355,9 +385,9 @@ def PlotAll(SaveNames,params):
             
             def update(tt):
                 ii=ComponentsActive[tt]
-                im1.set_data(detrended_data[ii].max(0))        
-                im3.set_data(detrended_data[ii].max(1))        
-                im5.set_data(np.transpose(detrended_data[ii].max(2)))
+                im1.set_data(data[ii].max(0))        
+                im3.set_data(data[ii].max(1))        
+                im5.set_data(np.transpose(data[ii].max(2)))
             
                 for cc in range(C): 
                     im2[cc].set_data(shapes[components[cc]].max(0)*activity_NonNegative[components[cc],ii])
@@ -387,7 +417,7 @@ def PlotAll(SaveNames,params):
     if plot_residual_projections==True:
         
         dims=data.shape
-        cmap='gnuplot'         
+        cmap=color_map         
         
         pic_residual=percentile(residual, 95, axis=0)
         pic_denoised = max_intensity(denoised_data, axis=0)
@@ -476,24 +506,18 @@ def PlotAll(SaveNames,params):
     #plt.show()
     
      #%% ##### Plot denoised slices - Results
-    z_slices=[0,2,4,6,8] #which z slices to look at slice plots/videos
-#    z_slices=range(dims[min_dim+1]) #which z slices to look at slice plots/videos
+#    z_slices=[0,2,4,6,8] #which z slices to look at slice plots/videos
+    z_slices=range(dims[min_dim+1]) #which z slices to look at slice plots/videos
     D=len(z_slices)
     if plot_residual_slices==True:
         
         dims=data.shape
-        cmap='gnuplot'         
+        cmap=color_map         
         
         pic_residual=percentile(residual, 95, axis=0)
         pic_denoised = max_intensity(denoised_data, axis=0)
         pic_data=percentile(data, 95, axis=0)
         
-        left  = 0.05 # the left side of the subplots of the figure
-        right = 0.95   # the right side of the subplots of the figure
-        bottom = 0.05   # the bottom of the subplots of the figure
-        top = 0.95      # the top of the subplots of the figure
-        wspace = 0.05   # the amount of width reserved for blank space between subplots
-        hspace = 0.05  # the amount of height reserved for white space between subplots
         
         a=3 #number of rows
         fig1=plt.figure(figsize=(18,11))
@@ -537,68 +561,76 @@ def PlotAll(SaveNames,params):
     if video_residual:
         fig = plt.figure(figsize=(16,7))
         mi = 0
-        ma = max(detrended_data)*scale
+        ma = max(data)*scale
         mi3 = 0
         ma3 = max(residual)*scale
 
         ii=0
         #import colormaps as cmaps
         #cmap=cmaps.viridis
-        cmap='gnuplot'
-        a=3
+        cmap=color_map
+
+
+        
+        
+        spatial_dims_ind=range(len(dims)-1)
+        D=len(spatial_dims_ind)
+        a=D
         b=3
         
-        
-        D=len(np.shape(data))-1 #number of spatial dimensions
         im_array=[]
         transpose_flags=[]
         for kk in range(D):
             transpose_flags+= [False]
-            temp=np.shape(detrended_data[ii].max(kk))
+            temp=np.shape(data[ii].max(spatial_dims_ind[kk]))
             if temp[0]>temp[1]:
                 transpose_flags[kk]=True    
                 
         for kk in range(D):
             ax1 = plt.subplot(a,b,D*kk+1)            
             if transpose_flags[kk]==False:
-                pic=max_intensity(denoised_data[ii],kk)
+                pic=max_intensity(denoised_data[ii],spatial_dims_ind[kk])
             else:
-                pic=np.transpose(max_intensity(denoised_data[ii],kk),[1,0,2])  
+                pic=np.transpose(max_intensity(denoised_data[ii],spatial_dims_ind[kk]),[1,0,2])  
             im_array += [ax1.imshow(pic,interpolation='None')]
             ax1.set_title('Denoised')
             plt.colorbar(im_array[-1])
+            plt.setp(ax1,xticks=[],yticks=[])
             
             ax2 = plt.subplot(a,b,D*kk+2)
             if transpose_flags[kk]==False:
-                pic=detrended_data[ii].max(kk)
+                pic=data[ii].max(spatial_dims_ind[kk])
             else:
-                pic=np.transpose(detrended_data[ii].max(kk))
+                pic=np.transpose(data[ii].max(spatial_dims_ind[kk]))
                 
             im_array += [ax2.imshow(pic, vmin=mi, vmax=ma,cmap=cmap)]
             title=ax2.set_title('Data')            
             plt.colorbar(im_array[-1])
+            plt.setp(ax2,xticks=[],yticks=[])
             
             ax3 = plt.subplot(a,b,D*kk+3)            
             if transpose_flags[kk]==False:
-                pic=residual[ii].max(kk)
+                pic=residual[ii].max(spatial_dims_ind[kk])
             else:
-                pic=np.transpose(residual[ii].max(kk))        
+                pic=np.transpose(residual[ii].max(spatial_dims_ind[kk]))        
             im_array += [ax3.imshow(pic, vmin=mi3, vmax=ma3,cmap=cmap)]
             ax3.set_title('Residual')
             plt.colorbar(im_array[-1])
+            plt.setp(ax3,xticks=[],yticks=[])
 
-        fig.tight_layout()
+#        fig.tight_layout()
+        plt.subplots_adjust(left, bottom, right, top, wspace, hspace)
             
         def update(ii):
             for kk in range(D):
                 if transpose_flags[kk]==False:
-                    im_array[kk*D].set_data(max_intensity(denoised_data[ii],kk))
-                    im_array[kk*D+1].set_data(detrended_data[ii].max(kk))        
-                    im_array[kk*D+2].set_data(residual[ii].max(kk))                     
+                    im_array[kk*D].set_data(max_intensity(denoised_data[ii],spatial_dims_ind[kk]))
+                    im_array[kk*D+1].set_data(data[ii].max(spatial_dims_ind[kk]))        
+                    im_array[kk*D+2].set_data(residual[ii].max(spatial_dims_ind[kk]))                     
                 else:
-                    im_array[kk*D].set_data(np.transpose(max_intensity(denoised_data[ii],kk),[1,0,2]))
-                    im_array[kk*D+1].set_data(np.transpose(detrended_data[ii].max(kk)))        
-                    im_array[kk*D+2].set_data(np.transpose(residual[ii].max(kk)))                     
+                    im_array[kk*D].set_data(np.transpose(max_intensity(denoised_data[ii],spatial_dims_ind[kk]),[1,0,2]))
+                    im_array[kk*D+1].set_data(np.transpose(data[ii].max(spatial_dims_ind[kk])))        
+                    im_array[kk*D+2].set_data(np.transpose(residual[ii].max(spatial_dims_ind[kk])))                     
             
             title.set_text('Data, time = %.1f' % ii)
         
@@ -611,22 +643,21 @@ def PlotAll(SaveNames,params):
             plt.show()  
             
     #%% #####  Video Slices Residual    
-    z_slices=[0,2,4,6,8] #which z slices to look at slice plots/videos    
-#    z_slices=range(dims[min_dim+1]) #which z slices to look at slice plots/videos
+#    z_slices=[0,2,4,6,8] #which z slices to look at slice plots/videos    
+    z_slices=range(dims[min_dim+1]) #which z slices to look at slice plots/videos
     
     if video_slices:
         fig = plt.figure(figsize=(16,7))
         mi = 0
-        ma = max(detrended_data)*scale
+        ma = max(data)*scale
         mi3 = 0
         ma3 = max(residual)*scale
 
         ii=0
         #import colormaps as cmaps
         #cmap=cmaps.viridis
-        cmap='gnuplot'
+        cmap=color_map
         a=3
-        b=3
         
         D=len(z_slices) #number of spatial dimensions
         im_array=[]
@@ -642,9 +673,10 @@ def PlotAll(SaveNames,params):
             im_array += [ax1.imshow(pic,interpolation='None')]
             ax1.set_title('Denoised, z='+ str(z_slices[kk]+1))
             plt.colorbar(im_array[-1])
+            plt.setp(ax1,xticks=[],yticks=[])
             
             ax2 = plt.subplot(a,D,kk+D+1)
-            temp=np.squeeze(np.take(detrended_data[ii],(z_slices[kk],),axis=min_dim))
+            temp=np.squeeze(np.take(data[ii],(z_slices[kk],),axis=min_dim))
             if transpose_flag==False:
                 pic=temp
             else:
@@ -653,6 +685,7 @@ def PlotAll(SaveNames,params):
             im_array += [ax2.imshow(pic, vmin=mi, vmax=ma,cmap=cmap)]
             title=ax2.set_title('Data')            
             plt.colorbar(im_array[-1])
+            plt.setp(ax2,xticks=[],yticks=[])
             
             ax3 = plt.subplot(a,D,kk+2*D+1) 
             temp=np.squeeze(np.take(residual[ii],(z_slices[kk],),axis=min_dim))
@@ -663,13 +696,15 @@ def PlotAll(SaveNames,params):
             im_array += [ax3.imshow(pic, vmin=mi3, vmax=ma3,cmap=cmap)]
             ax3.set_title('Residual')
             plt.colorbar(im_array[-1])
+            plt.setp(ax3,xticks=[],yticks=[])
 
-        fig.tight_layout()
-            
+#        fig.tight_layout()
+        plt.subplots_adjust(left, bottom, right, top, wspace, hspace)        
+        
         def update(ii):
             for kk in range(D):
                 temp1=np.squeeze(np.take(denoised_data[ii],(z_slices[kk],),axis=min_dim))
-                temp2=np.squeeze(np.take(detrended_data[ii],(z_slices[kk],),axis=min_dim))
+                temp2=np.squeeze(np.take(data[ii],(z_slices[kk],),axis=min_dim))
                 temp3=np.squeeze(np.take(residual[ii],(z_slices[kk],),axis=min_dim))
                 if transpose_flag==False:                    
                     im_array[a*kk].set_data(temp1)
@@ -745,7 +780,7 @@ def PlotAll(SaveNames,params):
         #            temp=transpose(temp)
         #        mi=min(temp[temp>0])
         #        ma=max(temp)
-        #        plt.imshow(temp,vmin=mi,vmax=ma,cmap='gnuplot')
+        #        plt.imshow(temp,vmin=mi,vmax=ma,cmap=color_map)
         #        plt.setp(ax,xticks=[],yticks=[])
         #        if dd==0:
         #            ax.set_title('Component #'+str(ll+1))

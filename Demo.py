@@ -6,7 +6,7 @@ def GetDefaultParams():
     # choose dataset name (function GetData will use this to fetch the correct dataset)
     data_name_set=['Hillman','HillmanSmall','Sophie2D','Sophie3D','SophieVoltage3D', \
     'SaraSmall','Sara19DEC2015_w1t1','PhilConfocal','PhilMFM']
-    data_name=data_name_set[-1]
+    data_name=data_name_set[1]
     
     # "default" parameters - for additional information see "LocalNMF" in BlockLocalNMF
     
@@ -30,6 +30,7 @@ def GetDefaultParams():
     Connected=False # should we constrain all spatial component to be connected?
     WaterShed=False # should we constrain all spatial component to have only one watershed component?
     
+    # experimental stuff - don't use for now
     estimateNoise=False # should we tune sparsity and number of neurons to reach estimated noise level?
     PositiveError=False # should we tune sparsity and number of neurons to have only positive residual error?
     FixSupport=False # should we fix non-zero support at main NMF iterations?
@@ -37,7 +38,7 @@ def GetDefaultParams():
 
     SuperVoxelize=False # should we supervoxelize data (does not work now)
 
-        
+    # change parameters for other datasets    
     if data_name=='Sophie2D':
         mbs=[2]
         ds=2
@@ -122,7 +123,7 @@ def GetDefaultParams():
         WaterShed=True
 
         FinalNonNegative=False
-        sig=(50,50,3)
+        sig=(500,500,3)
         
         
 
