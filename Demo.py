@@ -4,9 +4,8 @@ def GetDefaultParams():
     # Get parameters for: Data type, NMF algorithm and intialization
     
     # choose dataset name (function GetData will use this to fetch the correct dataset)
-    data_name_set=['Hillman','HillmanSmall','Sophie2D','Sophie3D','SophieVoltage3D', \
-    'SaraSmall','Sara19DEC2015_w1t1','PhilConfocal','PhilMFM']
-    data_name=data_name_set[1]
+    data_name_set=['Xin_MFM','HillmanSmall','PhilConfocal','PhilMFM']
+    data_name=data_name_set[0]
     
     # "default" parameters - for additional information see "LocalNMF" in BlockLocalNMF
     
@@ -39,53 +38,29 @@ def GetDefaultParams():
     SuperVoxelize=False # should we supervoxelize data (does not work now)
 
     # change parameters for other datasets    
-    if data_name=='Sophie2D':
+    if data_name=='Xin_MFM':
+        NumCent=0
         mbs=[2]
-        ds=2
-        TargetAreaRatio=[0.03,0.15]
-        iters=30
-        iters0=[30]
-        repeats=10
-        updateLambdaIntervals=2
+        #ds=[2,2,1]
+        ds=[2,2]
+        #TargetAreaRatio=[0.005,0.03]
+        TargetAreaRatio = [0.3,0.8]
+        iters=20
+        iters0=[60]
+        repeats=1
+        updateLambdaIntervals=4
+        addComponentsIntervals=1
         updateRhoIntervals=1
-        lam1_s=0.01
-        Background_num=0 #number of background components
+        lam1_s=1
+        Background_num=1 #number of background components
+        bkg_per=0.02
 
         Connected=True
-        sig=(500,500)
-    elif data_name=='Sophie3D':
-        mbs=[1]
-        ds=1
-        TargetAreaRatio=[0.002,0.02]
-        iters=50
-        iters0=[10]
-        repeats=100
-        Background_num=5 #number of background components
-    elif data_name=='SophieVoltage3D':
-        mbs=[1]
-        ds=1
-        TargetAreaRatio=[0.002,0.02]
-        iters=50
-        iters0=[10]
-        repeats=100
-        Background_num=0 #number of background components
-        FinalNonNegative=False
-    elif data_name=='Sara19DEC2015_w1t1' or data_name=='SaraSmall':
-        mbs=[1]
-        ds=1
-        TargetAreaRatio=[0.005,0.02]
-        repeats=1
-        iters0=[50]
-        iters=200
-        updateLambdaIntervals=2
-        updateRhoIntervals=1
-        lam1_s=0.1
-        Background_num=1 #number of background components
-        bkg_per=0.01
-        Connected=True
         WaterShed=True
-        FinalNonNegative=False
-        sig=(10,10,1)
+
+        FinalNonNegative=True
+        #sig=(500,500,3)
+        sig=(30,30)
     elif data_name=='PhilConfocal':
         NumCent=50
         mbs=[1]

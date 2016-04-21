@@ -5,6 +5,7 @@ Created on Thu Nov 12 13:52:06 2015
 @author: Daniel
 """
 import numpy as np
+from matplotlib import pyplot as plt
     
 def GetFileName(params_dict,rep):
 
@@ -52,7 +53,8 @@ def GetDataFolder():
     if os.getcwd()[0]=='C':
         DataFolder='G:/BackupFolder/'
     else:
-        DataFolder='Data/'
+        #DataFolder='Data/'
+        DataFolder='D:/Documents/fijiproc/SourceExtraction-master/SourceExtraction-master'
     
     return DataFolder
     
@@ -73,29 +75,6 @@ def GetData(data_name):
     # Fetch experimental 3D data     
     if data_name=='HillmanSmall':
         data=load('data_small')
-    elif data_name=='Hillman':
-        temp = h5py.File(DataFolder + 'Hillman/150724_mouseRH2d1_data_crop_zig_sm_ds.mat')
-        data=temp["moviesub_sm"]
-        data=np.asarray(data,dtype='float')
-        data = data[10:-70,2:-2,2:-2,2:-2]   # bad values appear near the edges, and everything is moving at the few first and last frames
-    elif data_name=='Sophie2D':
-        temp=loadmat(DataFolder + 'Sophie2D_drosophila_lightfield/processed_data.mat')
-        data=np.transpose(np.asarray(temp['data'],dtype='float'), [2, 0, 1])
-        data=data-np.min(data) # takes care of negative values due to detrending
-        temp=None
-    elif data_name=='Sophie3D':# check data dimenstions
-        img = tff.TiffFile(DataFolder + 'Sophie3D_drosophila_lightfield/Sophie3Ddata.tif')
-        data=img.asarray()     
-    elif data_name=='SophieVoltage3D':# check data dimenstions        
-        img = tff.TiffFile(DataFolder + 'Sophie3D_drosophila_lightfield/SophieVoltageData.tif')
-        data=img.asarray()   
-    elif data_name=='SaraSmall':
-        data=load(DataFolder + 'Sara19DEC2015/SaraSmall')
-    elif data_name=='Sara19DEC2015_w1t1':
-        temp = loadmat(DataFolder + 'Sara19DEC2015/processed_data.mat')
-        data=temp["data"]
-        data=np.asarray(data,dtype='float')  
-        data=np.transpose(np.asarray(temp['data'],dtype='float'), [3,0,1, 2])
     elif data_name=='PhilConfocal':
         img= tff.TiffFile(DataFolder + 'Phil24FEB2016/confocal_stack.tif')
         data=img.asarray()
@@ -107,6 +86,13 @@ def GetData(data_name):
 #        data=np.asarray(data,dtype='float')  
         data=np.transpose(data, [0,2,3,1])  
         data=data-np.percentile(data, 0.1, axis=0)# takes care of negative values (ands strong positive values) in each pixel                  
+    elif data_name=='Xin_MFM':
+        img = tff.TiffFile('Xin_OTO_che2.tif')
+        data=img.asarray()
+        data = data[:,:,15:-20,15:-20]
+        #data[:,3:6,:,:] = 150
+        data=np.transpose(data,[0,2,3,1])
+        #data=data-np.percentile(data, 0.1, axis=0)
     else:
         print 'unknown dataset name!'
     return data
@@ -372,6 +358,120 @@ def ThresholdShapes(shapes,adaptBias,TargetAreaRatio,MaxRatio):
             temp[temp<threshold]=0
             shapes[ll]=temp
     return shapes
+
+def shapesPlot(shapes,inds,fig,ax):
+    
+    from skimage.measure import label,regionprops
+    from skimage import feature
+    from skimage.morphology import binary_dilation
+    from skimage.segmentation import find_boundaries
+    import pylab as plt
+    import numpy as np
+    
+    #fig = plt.figure()
+    #ax = fig.add_subplot(111)
+    sz = np.int32(shapes.shape)
+    
+    
+    for i in inds:
+        img = shapes[i,:,:]
+        mx = img[:].max()
+        test = img>0.4*mx
+        test2 = binary_dilation(binary_dilation(test))
+        lbls = label(test2)
+        rgs = regionprops(lbls)
+        if np.size(rgs)>0:
+            szs = []
+            for prop in rgs:
+                szs.append(prop.area)
+            ind = np.argmax(szs)
+            if rgs[ind].area>100:
+                pt = rgs[ind].centroid
+                region = lbls==ind+1
+                edges = find_boundaries(region)
+                eln = edges.nonzero()
+                ax.scatter(eln[1],eln[0],marker='.',color='r',linewidths=0.01)
+                ax.text(pt[1]-4,pt[0]+4,'%i' % i,fontsize=14,color='k')
+    
+    return fig,ax
+        
+def stackPlot(data):
+    
+    sz = np.int32(data.shape)
+    top = np.int32(np.sqrt(sz[2]))
+    side = np.int32(np.ceil(np.double(sz[2])/top))
+    fig = plt.figure()
+    axdict = {}
+    
+    for i in range(1,sz[2]+1):
+        axdict[i] = fig.add_subplot(top,side,i)
+        axdict[i].imshow(data[:,:,i-1])
+    
+    return fig,axdict
+
+def fullShapes(shapes,inds,fig,axdict):
+    
+    
+    for i in inds:
+        mx = shapes[i,:,:,:].max()
+        shapes[i,:,:,:] = shapes[i,:,:,:]>0.4*mx
+        
+    for i in axdict.keys():
+        fig, axdict[i] = shapesPlot(shapes[:,:,:,i-1],inds,fig,axdict[i])
+    
+    return fig, axdict
+
+class Centers:
+    
+    def __init__(self, coords):
+        self.coords = coords
+        self.xs = []
+        self.ys = []
+        self.axes = []
+        self.current = 1
+        
+    def connect(self):
+        self.cid = self.coords.canvas.mpl_connect('button_press_event',self.onclick)
+        self.cid2 = self.coords.canvas.mpl_connect('key_press_event',self.onkey)
+        
+    def onclick(self,event):
+        
+        if event.xdata==None: return
+        self.xs.append(event.xdata)
+        self.ys.append(event.ydata)
+        self.axes.append(self.current)
+        print '###click###',event.xdata,event.ydata,self.current
+    
+    def onkey(self, event):
+        
+    
+        if event.key=='n':
+            self.current = self.current+1
+        print '#### now on axis #',self.current
+    
+    def disconnect(self):
+        
+        self.coords.canvas.mpl_disconnect(self.cid)
+        self.coords.canvas.mpl_disconnect(self.cid2)
+
+def findCenters(data):
+    
+    fig,axdict = stackPlot(data.max(axis=0))
+    cds = Centers(fig)
+    cds.connect()
+    
+    
+    return cds    
+
+
+    
+    
+        
+        
+    
+    
+
+
         
     
 ## Depricated

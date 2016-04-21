@@ -3,9 +3,11 @@ from scipy.signal import welch
 from scipy.ndimage.filters import median_filter
 import numpy as np
 from scipy.ndimage.measurements import label
-from skimage.morphology import watershed
+from skimage.measure import regionprops
+from skimage.morphology import watershed, binary_dilation
 from skimage.feature import peak_local_max
 from scipy.ndimage.filters import gaussian_filter
+from scipy.sparse.csgraph import connected_components
 
 def GetBox(centers, R, dims):
     D = len(R)
@@ -99,6 +101,125 @@ def LargestWatershedRegion(shapes,dims,skipBias):
     L=len(shapes)-skipBias     
     shapes=shapes.reshape((-1,) + dims[1:]) 
     D=len(dims)
+    num_peaks=4
+#    structure=np.ones(tuple(3*np.ones((np.ndim(shapes)-1,1))))
+    for ll in range(L): 
+        temp=shapes[ll]
+        local_maxi = peak_local_max(gaussian_filter(temp,[1]*(D-1)), exclude_border=False, indices=False, num_peaks=num_peaks)
+        markers,junk = label(local_maxi)
+        nonzero_mask=temp>0
+        if np.sum(nonzero_mask)>(3**3)*num_peaks:
+            labels = watershed(-temp, markers, mask=nonzero_mask) #watershed regions
+            ind = 1
+            temp2 = np.copy(temp)
+            temp2[labels!=1]=0
+            total_intensity = sum(temp2.reshape(-1,))
+            for kk in range(2,labels.max()+1):
+                temp2 = np.copy(temp)
+                temp2[labels!=kk]=0
+                total_intensity2 = sum(temp2.reshape(-1,))
+                if total_intensity2>total_intensity:
+                    ind = kk
+                    total_intensity=total_intensity2
+            temp[labels!=ind]=0
+            shapes[ll]=temp
+    shapes=shapes.reshape((len(shapes),-1))
+    return shapes
+
+def findROI(footprint):
+    
+    dims = footprint.shape
+    footprint = footprint.reshape(dims[0],dims[1],-1)
+    ROI = zeros(footprint.shape)
+    
+    mxs = []
+    for i in range(np.size(footprint[0,0,:])):
+        mxs.append(footprint.reshape(-1,1).max())
+    
+    for i in range(np.size(footprint[0,0,:])):
+        img = footprint[:,:,i].reshape(dims[0],dims[1])
+        mx = mxs[i]
+        thresh = img>0.4*mx
+        thresh2 = binary_dilation(binary_dilation(thresh))
+        lbls,marks = label(thresh2)
+        rgs = regionprops(lbls)
+        if np.size(rgs)>0:
+            szs = []
+            for prop in rgs:
+                szs.append(prop.area)
+            ind = np.argmax(szs)
+            if rgs[ind].area>100:
+                region = lbls==ind+1
+                out = zeros([dims[0],dims[1]])
+                out[region] = 1
+                ROI[:,:,i] = out
+                
+    ROI = ROI.reshape(dims)
+    
+    return ROI
+
+def mergeOverlap(shapes,dims,skipBias,activity,mask,centers,boxes,ES):
+    
+    L = len(shapes)-skipBias
+    shapes=shapes.reshape((-1,) + dims[1:])
+    ROIs = zeros(shapes.shape)
+    
+    sizes = []
+    for i in range(L):
+        ROIs[i] = findROI(shapes[i])
+        sizes.append(sum(ROIs[i].reshape(-1,1)))
+        
+    sizes = np.array(sizes)
+    
+    connMatrix = zeros([L,L])
+    for jj in range(L):
+        for kk in range(L-jj-1):
+            overlap = sum(np.multiply(ROIs[jj],ROIs[kk+jj+1]).reshape(-1,1))
+            if (overlap>0.6*sizes[kk+jj+1])&(overlap>0.6*sizes[jj]) or overlap>0.6*sizes[kk+jj+1] or overlap>0.6*sizes[jj]:
+                connMatrix[jj,kk+jj+1] = 1
+                connMatrix[kk+jj+1,jj] = 1
+                
+    num,labels = connected_components(connMatrix)
+    shapesToDelete = []
+    
+    for ll in range(num):
+        check = labels==ll
+        if sum(check)>1:
+            inds = check.nonzero()[0]
+            mx = inds[np.argmax(sizes[inds])]
+            shapesToMerge = zeros((len(inds),)+dims[1:])
+            # activitiesToMerge = something
+            # masks, centers, etc ??
+            for jj,kk in enumerate(inds):
+                shapesToMerge[jj] = shapes[kk]
+                if kk != mx:
+                    shapesToDelete.append(kk)
+            shapes[mx] = shapesToMerge.max(axis=0)
+            
+            
+    #shapes = np.delete(shapes,tuple(shapesToDelete),axis=0)
+    
+    for ll in shapesToDelete[::-1]:     
+        shapes=np.delete(shapes,(ll),axis=0)
+        activity=np.delete(activity,(ll),axis=0)
+        del mask[ll]
+        centers=np.delete(centers,(ll),axis=0)
+        boxes=np.delete(boxes,(ll),axis=0)
+        ES.delete(ll)
+        
+    L=len(shapes)-skipBias
+    shapes=shapes.reshape((len(shapes),-1))
+    # resizing, etc
+
+    return shapes,activity,mask,centers,boxes,ES,L
+    
+    
+
+def OldWatershed(shapes,dims,skipBias):
+    
+    L=len(shapes)-skipBias     
+    shapes=shapes.reshape((-1,) + dims[1:]) 
+    D=len(dims)
     num_peaks=2
 #    structure=np.ones(tuple(3*np.ones((np.ndim(shapes)-1,1))))
     for ll in range(L): 
@@ -111,6 +232,8 @@ def LargestWatershedRegion(shapes,dims,skipBias):
             temp[labels!=1]=0
             shapes[ll]=temp
     shapes=shapes.reshape((len(shapes),-1))
+    return shapes
+    
     return shapes
     
 def SmoothBackground(shapes,dims,adaptBias,sig_filt): 
@@ -546,6 +669,7 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
                     S=LargestConnectedComponent(S,dims0,adaptBias)
                 if WaterShed==True:
                     S=LargestWatershedRegion(S,dims0,adaptBias)
+                    S,activity,mask,centers,boxes,ES,L = mergeOverlap(shapes,dims,skipBias,activity,mask,centers,boxes,ES)
                 activity = HALS4activity(data0, S, activity,NonNegative,inner_iterations)                
                 S, activity, mask,centers,boxes,ES,L=RenormalizeDeleteSort(S, activity, mask,centers,boxes,ES)
                 lam1_s=ES.lam
@@ -625,6 +749,7 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
             S=LargestConnectedComponent(S,dims,adaptBias)
         if WaterShed==True:
             S=LargestWatershedRegion(S,dims,adaptBias)
+            S,activity,mask,centers,boxes,ES,L = mergeOverlap(shapes,dims,skipBias,activity,mask,centers,boxes,ES)
         if kk==iters-1:
             if FinalNonNegative==False:
                 NonNegative=False
