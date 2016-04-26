@@ -188,12 +188,17 @@ def mergeOverlap(shapes,dims,skipBias,activity,mask,centers,boxes,ES):
             inds = check.nonzero()[0]
             mx = inds[np.argmax(sizes[inds])]
             shapesToMerge = zeros((len(inds),)+dims[1:])
-            # activitiesToMerge = something
-            # masks, centers, etc ??
+            msk = list(mask[mx])
             for jj,kk in enumerate(inds):
                 shapesToMerge[jj] = shapes[kk]
+                activity[mx] = activity[mx]+activity[kk]
+                msk.extend(list(mask[kk]))
                 if kk != mx:
                     shapesToDelete.append(kk)
+            msk = list(set(msk))
+            mask[mx] = np.array(msk)
+            shapesToDelete = list(set(shapesToDelete))
+            shapesToDelete.sort()
             shapes[mx] = shapesToMerge.max(axis=0)
             
             
@@ -669,7 +674,7 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
                     S=LargestConnectedComponent(S,dims0,adaptBias)
                 if WaterShed==True:
                     S=LargestWatershedRegion(S,dims0,adaptBias)
-                    S,activity,mask,centers,boxes,ES,L = mergeOverlap(shapes,dims,skipBias,activity,mask,centers,boxes,ES)
+                    #S,activity,mask,centers,boxes,ES,L = mergeOverlap(S,dims0,adaptBias,activity,mask,centers,boxes,ES)
                 activity = HALS4activity(data0, S, activity,NonNegative,inner_iterations)                
                 S, activity, mask,centers,boxes,ES,L=RenormalizeDeleteSort(S, activity, mask,centers,boxes,ES)
                 lam1_s=ES.lam
@@ -749,7 +754,8 @@ def LocalNMF(data, centers, sig, NonNegative=True,FinalNonNegative=True,verbose=
             S=LargestConnectedComponent(S,dims,adaptBias)
         if WaterShed==True:
             S=LargestWatershedRegion(S,dims,adaptBias)
-            S,activity,mask,centers,boxes,ES,L = mergeOverlap(shapes,dims,skipBias,activity,mask,centers,boxes,ES)
+            if kk==iters-1:
+                S,activity,mask,centers,boxes,ES,L = mergeOverlap(S,dims,adaptBias,activity,mask,centers,boxes,ES)
         if kk==iters-1:
             if FinalNonNegative==False:
                 NonNegative=False

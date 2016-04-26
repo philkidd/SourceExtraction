@@ -142,6 +142,9 @@ if __name__ == "__main__":
         data=SuperVoxelize(data)        
 
     cent=GetCentersData(data,params.data_name,params.NumCent)
+    
+    #listcent = cPickle.load(open(params.data_name+'_cents','rb'))
+    #cent=(np.array(listcent)[:-1]).T
             
     if do_NMF==True:        
         for rep in range(params.repeats):  
@@ -152,7 +155,7 @@ if __name__ == "__main__":
             MSE_array, shapes, activity, boxes = LocalNMF(
                 data, cent, params.sig,TargetAreaRatio=params.TargetAreaRatio,updateLambdaIntervals=params.updateLambdaIntervals,addComponentsIntervals=params.addComponentsIntervals,
                 PositiveError=params.PositiveError,NonNegative=params.NonNegative,FinalNonNegative=params.FinalNonNegative, verbose=True,lam1_s=params.lam1_s, adaptBias=adaptBias,estimateNoise=params.estimateNoise,
-                Connected=params.Connected,SmoothBkg=params.SmoothBackground,FixSupport=params.FixSupport,bkg_per=params.bkg_per,iters0=params.iters0,iters=params.iters,mbs=params.mbs, ds=params.ds)
+                Connected=params.Connected,WaterShed=params.WaterShed,SmoothBkg=params.SmoothBackground,FixSupport=params.FixSupport,bkg_per=params.bkg_per,iters0=params.iters0,iters=params.iters,mbs=params.mbs, ds=params.ds)
             
             L=len(shapes)
             if L<=adaptBias:
